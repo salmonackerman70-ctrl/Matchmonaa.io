@@ -1,0 +1,614 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match Mona</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#101528;
+  color:white;
+}
+button,input,select{font:inherit}
+button{
+  border:0;
+  border-radius:10px;
+  padding:12px;
+  cursor:pointer;
+  font-weight:bold;
+}
+input,select{
+  width:100%;
+  padding:12px;
+  border:1px solid #424b69;
+  border-radius:10px;
+  background:#171f36;
+  color:white;
+  margin:5px 0 12px;
+}
+.container{
+  max-width:850px;
+  margin:auto;
+  padding:18px;
+}
+h1{text-align:center;color:#8cb8ff;margin:8px}
+.subtitle{text-align:center;color:#b7c3df;margin-bottom:22px}
+.panel{
+  background:#1a223b;
+  border:1px solid #303b5d;
+  border-radius:15px;
+  padding:16px;
+  margin-bottom:15px;
+}
+.primary{background:#4285f4;color:white}
+.secondary{background:#303b5d;color:white}
+button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:10px}
+.row>*{flex:1;min-width:0}
+.hidden{display:none!important}
+#message{color:#ffda85;white-space:pre-wrap}
+#roomInfo{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+#cards{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:7px;
+}
+.card{
+  min-width:0;
+  aspect-ratio:1/1;
+  background:#344467;
+  color:white;
+  border:2px solid #52678f;
+  border-radius:10px;
+  padding:2px;
+  font-size:clamp(17px,4.5vw,32px);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+}
+.card.open{background:#edf3ff;color:#17213a;border-color:#8cb8ff}
+.card.matched{background:#245f4b;border-color:#48c99b}
+.card:disabled{opacity:1}
+#timerBar{
+  width:100%;
+  height:8px;
+  background:#39415a;
+  border-radius:20px;
+  overflow:hidden;
+  margin:10px 0;
+}
+#timerFill{
+  height:100%;
+  width:100%;
+  background:#57d6a0;
+  transition:width .2s linear;
+}
+.small{font-size:13px;color:#bac7e2}
+#status{font-weight:bold}
+@media(max-width:520px){
+  .container{padding:10px}
+  .panel{padding:12px}
+  #cards{grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}
+  .card{border-radius:7px}
+  .row{gap:7px}
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+  <h1>🃏 MATCH MONA</h1>
+  <div class="subtitle">ONLINE MEMORY CARD GAME</div>
+
+  <section class="panel" id="setup">
+    <label>Your player name</label>
+    <input id="playerName" maxlength="16" placeholder="Enter your name">
+
+    <label>Number of matching pairs</label>
+    <select id="pairCount">
+      <option value="15">15 pairs — 30 cards</option>
+      <option value="30">30 pairs — 60 cards</option>
+      <option value="50">50 pairs — 100 cards</option>
+    </select>
+
+    <button class="primary" id="createBtn" style="width:100%">
+      Create Room
+    </button>
+
+    <p style="text-align:center">— OR JOIN A ROOM —</p>
+
+    <input id="roomInput" maxlength="6"
+      placeholder="Enter 6-character room code"
+      style="text-transform:uppercase">
+
+    <button class="secondary" id="joinBtn" style="width:100%">
+      Join Room
+    </button>
+    <p class="small">Share your room code with your friend.</p>
+  </section>
+
+  <div class="panel hidden" id="game">
+    <div id="roomInfo">
+      <span>Room: <b id="roomCodeDisplay"></b></span>
+      <span id="status">Waiting for player 2...</span>
+    </div>
+
+    <button class="secondary" id="copyBtn" style="width:100%;margin-top:10px">
+      Copy Room Code
+    </button>
+
+    <div class="row" style="margin-top:14px">
+      <div class="panel" style="margin:0">
+        <div class="small">PLAYER 1</div>
+        <b id="name1">-</b>
+        <div>Score: <span id="score1">0</span></div>
+      </div>
+      <div class="panel" style="margin:0">
+        <div class="small">PLAYER 2</div>
+        <b id="name2">Waiting...</b>
+        <div>Score: <span id="score2">0</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:15px">
+      <div id="turnText">Waiting for opponent...</div>
+      <div id="timerBar"><div id="timerFill"></div></div>
+      <div id="timerText" class="small">10 seconds</div>
+    </div>
+
+    <p id="message"></p>
+    <div id="cards"></div>
+
+    <button class="secondary" id="leaveBtn" style="width:100%;margin-top:15px">
+      Leave Room
+    </button>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+
+import {
+  getDatabase, ref, set, get, onValue, runTransaction
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+// YOUR FIREBASE CONFIGURATION
+const firebaseConfig = {
+  apiKey: "AIzaSyANLU--8TAWQKxS96gQF8HjUGpLNOjlSb4",
+  authDomain: "match-45b2f.firebaseapp.com",
+  databaseURL: "https://match-45b2f-default-rtdb.firebaseio.com",
+  projectId: "match-45b2f",
+  storageBucket: "match-45b2f.firebasestorage.app",
+  messagingSenderId: "866542436127",
+  appId: "1:866542436127:web:2bcacdc99d0b5d5e373a2a"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+const $ = id => document.getElementById(id);
+
+let myRole = 0;
+let currentRoom = "";
+let currentGame = null;
+let unsubscribe = null;
+let timerInterval = null;
+let resolving = false;
+let messageTimeout = null;
+
+const emojis = [
+ "🐶","🐱","🐼","🦊","🐸","🐵","🦁","🐯","🐨","🐰",
+ "🐻","🐷","🐮","🐔","🐧","🐦","🦄","🐙","🦋","🐢",
+ "🐬","🦈","🐳","🦀","🐝","🌻","🌹","🌈","⭐","🌙",
+ "☀️","🔥","🍎","🍉","🍇","🍓","🍒","🍍","🥑","🍕",
+ "🍔","🍟","🍩","🍪","🎂","⚽","🏀","🎮","🎸","🚗"
+];
+
+function showMessage(text){
+  $("message").textContent = text;
+}
+
+function clearMessage(){
+  $("message").textContent = "";
+}
+
+function makeDeck(pairCount){
+  const selected = emojis.slice(0, pairCount);
+  const cards = [];
+
+  selected.forEach((emoji, index) => {
+    cards.push({id:index*2, emoji, matched:false});
+    cards.push({id:index*2+1, emoji, matched:false});
+  });
+
+  for(let i=cards.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [cards[i],cards[j]]=[cards[j],cards[i]];
+  }
+
+  return cards;
+}
+
+function makeRoomCode(){
+  const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code="";
+  for(let i=0;i<6;i++){
+    code+=chars[Math.floor(Math.random()*chars.length)];
+  }
+  return code;
+}
+
+function stopWatching(){
+  if(unsubscribe){
+    unsubscribe();
+    unsubscribe=null;
+  }
+  if(timerInterval){
+    clearInterval(timerInterval);
+    timerInterval=null;
+  }
+}
+
+function startWatching(code){
+  stopWatching();
+  currentRoom=code;
+
+  $("setup").classList.add("hidden");
+  $("game").classList.remove("hidden");
+  $("roomCodeDisplay").textContent=code;
+
+  const roomRef=ref(db,"rooms/"+code);
+
+  unsubscribe=onValue(roomRef,snapshot=>{
+    if(!snapshot.exists()){
+      showMessage("Room no longer exists.");
+      return;
+    }
+
+    currentGame=snapshot.val();
+    drawGame();
+  },error=>{
+    showMessage("Database error: "+error.message);
+  });
+
+  timerInterval=setInterval(()=>{
+    if(!currentGame || currentGame.status!=="playing") return;
+
+    const remaining=currentGame.deadline-Date.now();
+
+    if(remaining<=0){
+      handleTimeout();
+    }
+
+    updateTimer();
+  },250);
+}
+
+async function createRoom(){
+  const name=$("playerName").value.trim()||"Player 1";
+  const pairCount=Number($("pairCount").value);
+
+  $("createBtn").disabled=true;
+  showMessage("Creating room...");
+
+  try{
+    let code="";
+    let created=false;
+
+    for(let attempt=0;attempt<5;attempt++){
+      code=makeRoomCode();
+      const roomRef=ref(db,"rooms/"+code);
+      const snapshot=await get(roomRef);
+
+      if(snapshot.exists()) continue;
+
+      const room={
+        status:"waiting",
+        pairCount,
+        players:{
+          1:{name},
+          2:null
+        },
+        cards:makeDeck(pairCount),
+        turn:1,
+        selected:[],
+        scores:{1:0,2:0},
+        deadline:0,
+        resolving:false,
+        createdAt:Date.now()
+      };
+
+      await set(roomRef,room);
+      created=true;
+      break;
+    }
+
+    if(!created) throw new Error("Could not create a unique room. Try again.");
+
+    myRole=1;
+    startWatching(code);
+    showMessage("Room created! Send the code to your friend.");
+  }catch(error){
+    showMessage("Could not create room: "+error.message);
+  }finally{
+    $("createBtn").disabled=false;
+  }
+}
+
+async function joinRoom(){
+  const name=$("playerName").value.trim()||"Player 2";
+  const code=$("roomInput").value.trim().toUpperCase();
+
+  if(!/^[A-Z0-9]{6}$/.test(code)){
+    showMessage("Enter a valid 6-character room code.");
+    return;
+  }
+
+  $("joinBtn").disabled=true;
+  showMessage("Joining room...");
+
+  try{
+    const roomRef=ref(db,"rooms/"+code);
+    let role=0;
+
+    const result=await runTransaction(roomRef,room=>{
+      if(!room) return;
+      if(room.status!=="waiting") return;
+      if(room.players && room.players[2]) return;
+
+      room.players=room.players||{};
+      room.players[2]={name};
+      room.status="playing";
+      room.turn=1;
+      room.deadline=Date.now()+10000;
+      room.selected=[];
+      room.resolving=false;
+      role=2;
+      return room;
+    });
+
+    if(!result.committed){
+      const snapshot=await get(roomRef);
+      if(!snapshot.exists()) throw new Error("Room not found. Check the code.");
+      throw new Error("Room is full or the game has already started.");
+    }
+
+    myRole=role;
+    startWatching(code);
+    showMessage("Joined! Game started.");
+  }catch(error){
+    showMessage(error.message);
+  }finally{
+    $("joinBtn").disabled=false;
+  }
+}
+
+function drawGame(){
+  const g=currentGame;
+  if(!g) return;
+
+  $("name1").textContent=g.players?.[1]?.name||"Player 1";
+  $("name2").textContent=g.players?.[2]?.name||"Waiting...";
+  $("score1").textContent=g.scores?.[1]||0;
+  $("score2").textContent=g.scores?.[2]||0;
+
+  const status=$("status");
+
+  if(g.status==="waiting"){
+    status.textContent="Waiting for player 2...";
+    $("turnText").textContent="Share the room code with your friend.";
+  }else if(g.status==="finished"){
+    status.textContent="Game finished";
+    const s1=g.scores[1]||0;
+    const s2=g.scores[2]||0;
+    $("turnText").textContent=
+      s1===s2?"It's a tie!":(s1>s2?g.players[1].name:g.players[2].name)+" wins!";
+  }else{
+    status.textContent="Game in progress";
+    const player=g.players[g.turn]?.name||("Player "+g.turn);
+    $("turnText").textContent=
+      (g.turn===myRole?"Your turn":"Waiting for "+player)+
+      " — "+player;
+  }
+
+  const board=$("cards");
+  board.innerHTML="";
+
+  const selectedIds=g.selected||[];
+
+  g.cards.forEach(card=>{
+    const button=document.createElement("button");
+    button.className="card";
+
+    const isOpen=selectedIds.includes(card.id);
+    const isMatched=card.matched;
+
+    button.textContent=(isOpen||isMatched)?card.emoji:"?";
+    if(isOpen) button.classList.add("open");
+    if(isMatched) button.classList.add("matched");
+
+    button.disabled=
+      g.status!=="playing" ||
+      g.turn!==myRole ||
+      g.resolving ||
+      isOpen ||
+      isMatched ||
+      selectedIds.length>=2;
+
+    button.addEventListener("click",()=>flipCard(card.id));
+    board.appendChild(button);
+  });
+
+  updateTimer();
+}
+
+function updateTimer(){
+  const g=currentGame;
+  if(!g || g.status!=="playing"){
+    $("timerFill").style.width="0%";
+    $("timerText").textContent="Waiting for game...";
+    return;
+  }
+
+  const remaining=Math.max(0,g.deadline-Date.now());
+  const seconds=Math.ceil(remaining/1000);
+
+  $("timerFill").style.width=(remaining/10000*100)+"%";
+  $("timerText").textContent=seconds+" seconds remaining";
+}
+
+async function flipCard(cardId){
+  if(!currentGame || currentGame.status!=="playing") return;
+  if(currentGame.turn!==myRole || currentGame.resolving) return;
+
+  const roomRef=ref(db,"rooms/"+currentRoom);
+
+  try{
+    await runTransaction(roomRef,g=>{
+      if(!g || g.status!=="playing") return;
+      if(g.turn!==myRole || g.resolving) return;
+      if(g.deadline<=Date.now()) return;
+      if((g.selected||[]).length>=2) return;
+
+      const card=g.cards.find(c=>c.id===cardId);
+      if(!card || card.matched) return;
+      if(g.selected.includes(cardId)) return;
+
+      g.selected=[...(g.selected||[]),cardId];
+      return g;
+    });
+  }catch(error){
+    showMessage("Card error: "+error.message);
+  }
+}
+
+async function resolveCards(){
+  if(!currentGame || currentGame.status!=="playing") return;
+
+  const roomRef=ref(db,"rooms/"+currentRoom);
+  let claimed=false;
+
+  try{
+    const claim=await runTransaction(roomRef,g=>{
+      if(!g || g.status!=="playing") return;
+      if(g.resolving || (g.selected||[]).length!==2) return;
+      g.resolving=true;
+      return g;
+    });
+
+    claimed=claim.committed;
+    if(!claimed) return;
+
+    await new Promise(resolve=>setTimeout(resolve,850));
+
+    await runTransaction(roomRef,g=>{
+      if(!g || g.status!=="playing" || !g.resolving) return;
+
+      const selected=g.selected||[];
+      const first=g.cards.find(c=>c.id===selected[0]);
+      const second=g.cards.find(c=>c.id===selected[1]);
+
+      if(first && second && first.emoji===second.emoji){
+        g.cards=g.cards.map(c=>
+          selected.includes(c.id)?{...c,matched:true}:c
+        );
+
+        g.scores[g.turn]=(g.scores[g.turn]||0)+1;
+
+        const allMatched=g.cards.every(c=>c.matched);
+        if(allMatched){
+          g.status="finished";
+        }
+      }else{
+        g.turn=g.turn===1?2:1;
+      }
+
+      g.selected=[];
+      g.resolving=false;
+      g.deadline=g.status==="playing"?Date.now()+10000:0;
+      return g;
+    });
+  }catch(error){
+    showMessage("Could not resolve cards: "+error.message);
+  }
+}
+
+async function handleTimeout(){
+  if(!currentGame || currentGame.status!=="playing") return;
+  if(currentGame.deadline>Date.now() || currentGame.resolving) return;
+
+  const roomRef=ref(db,"rooms/"+currentRoom);
+
+  try{
+    await runTransaction(roomRef,g=>{
+      if(!g || g.status!=="playing") return;
+      if(g.deadline>Date.now() || g.resolving) return;
+
+      g.selected=[];
+      g.turn=g.turn===1?2:1;
+      g.deadline=Date.now()+10000;
+      return g;
+    });
+  }catch(error){
+    showMessage("Timer error: "+error.message);
+  }
+}
+
+let previousSelected="";
+
+function checkForResolution(){
+  if(!currentGame || currentGame.status!=="playing") return;
+
+  const selected=currentGame.selected||[];
+  const key=selected.join(",");
+
+  if(selected.length===2 && !currentGame.resolving && key!==previousSelected){
+    previousSelected=key;
+    resolveCards();
+  }
+
+  if(selected.length===0) previousSelected="";
+}
+
+const originalDrawGame=drawGame;
+drawGame=function(){
+  originalDrawGame();
+  checkForResolution();
+};
+
+$("createBtn").addEventListener("click",createRoom);
+$("joinBtn").addEventListener("click",joinRoom);
+
+$("copyBtn").addEventListener("click",async()=>{
+  try{
+    await navigator.clipboard.writeText(currentRoom);
+    showMessage("Room code copied!");
+  }catch{
+    showMessage("Your room code is: "+currentRoom);
+  }
+});
+
+$("leaveBtn").addEventListener("click",()=>{
+  stopWatching();
+  currentRoom="";
+  currentGame=null;
+  myRole=0;
+  resolving=false;
+  previousSelected="";
+  $("game").classList.add("hidden");
+  $("setup").classList.remove("hidden");
+  clearMessage();
+});
+
+$("roomInput").addEventListener("input",()=>{
+  $("roomInput").value=$("roomInput").value.toUpperCase();
+});
+</script>
+</body>
+</html>
